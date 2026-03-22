@@ -4,7 +4,7 @@
 
       <!-- 標題 -->
       <h1 class="text-2xl font-bold text-gray-800 mb-2">合約審閱系統</h1>
-      <p class="text-gray-500 text-sm mb-8">上傳 PDF 合約，自動偵測違反台灣消保法的條款</p>
+      <p class="text-gray-500 text-sm mb-8">上傳 PDF 合約，自動分析潛在違法條款並提供法規依據</p>
 
       <!-- 上傳區域 -->
       <div
@@ -145,7 +145,9 @@ async function upload() {
       headers: { 'Content-Type': 'multipart/form-data' },
       timeout: 120000,
     })
-    sessionStorage.setItem('analysisResult', JSON.stringify(res.data))
+    const { htmlContent, ...rest } = res.data
+    sessionStorage.setItem('analysisResult', JSON.stringify(rest))
+    if (htmlContent) sessionStorage.setItem('pdfHtml', htmlContent)
     router.push('/annotation')
   } catch (e) {
     error.value = e.response?.data?.detail || '分析失敗，請確認後端服務是否正常運行'

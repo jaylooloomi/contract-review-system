@@ -2,6 +2,7 @@ import os
 import logging
 import httpx
 import pdfplumber
+import fitz  # pymupdf
 from datetime import datetime
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -31,12 +32,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://127.0.0.1:5173",
-        "http://localhost:5173",
-        "http://127.0.0.1:3000",
-        "http://localhost:3000",
-    ],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -60,6 +56,54 @@ def extract_text_from_pdf(file_bytes: bytes) -> str:
     except Exception as e:
         logger.error(f"PDF 提取失敗: {e}")
         raise HTTPException(status_code=422, detail=f"無法解析 PDF 檔案: {str(e)}")
+
+
+def extract_html_from_pdf(file_bytes: bytes) -> str:
+    """使用 pymupdf 將 PDF 轉換為清潔的 HTML（正常排版，方便前端高亮）"""
+    try:
+        doc = fitz.open(stream=file_bytes, filetype="pdf")
+        pages_html = []
+        for page_num, page in enumerate(doc):
+            blocks = page.get_text("dict")["blocks"]
+            page_html = f'<div class="pdf-page" id="page-{page_num}">'
+            for block_num, block in enumerate(blocks):
+                if block.get("type") != 0:
+                    continue
+                block_id = f"p{page_num}-b{block_num}"
+                block_html = f'<div class="pdf-block" id="{block_id}">'
+                for line in block.get("lines", []):
+                    line_html = '<span class="pdf-line">'
+                    for span in line.get("spans", []):
+                        text = span.get("text", "")
+                        size = span.get("size", 12)
+                        flags = span.get("flags", 0)
+                        bold = "font-weight:bold;" if flags & (1 << 4) else ""
+                        italic = "font-style:italic;" if flags & (1 << 1) else ""
+                        style = f"font-size:{size:.1f}pt;{bold}{italic}"
+                        line_html += f'<span style="{style}">{text}</span>'
+                    line_html += '</span><br>'
+                    block_html += line_html
+                block_html += '</div>'
+                page_html += block_html
+            page_html += '</div>'
+            pages_html.append(page_html)
+        doc.close()
+
+        css = """<style>
+body { font-family: serif; margin: 16px; background: #fff; }
+.pdf-page { margin-bottom: 32px; padding-bottom: 24px; border-bottom: 2px solid #e5e7eb; }
+.pdf-block { margin-bottom: 6px; line-height: 1.7; }
+.pdf-line { display: inline; }
+.highlight-high { background-color: rgba(252,165,165,0.55); border-radius: 3px; }
+.highlight-mid { background-color: rgba(253,224,71,0.55); border-radius: 3px; }
+.highlight-active { outline: 2px solid #3b82f6; outline-offset: 2px; }
+</style>"""
+        full_html = css + "\n".join(pages_html)
+        logger.info(f"PDF 轉 HTML 完成，共 {len(pages_html)} 頁，{len(full_html)} 字元")
+        return full_html
+    except Exception as e:
+        logger.error(f"PDF 轉 HTML 失敗: {e}")
+        return ""
 
 
 REGION_LABEL = {
@@ -139,9 +183,11 @@ async def analyze_contract(
     if file_size_mb > MAX_FILE_SIZE_MB:
         raise HTTPException(status_code=413, detail=f"檔案大小超過限制（最大 {MAX_FILE_SIZE_MB} MB）")
 
-    # 提取 PDF 文字
+    # 提取 PDF 文字與 HTML
     logger.info("開始提取 PDF 文字...")
     original_text = extract_text_from_pdf(file_bytes)
+    logger.info("開始轉換 PDF 為 HTML...")
+    html_content = extract_html_from_pdf(file_bytes)
 
     if not original_text.strip():
         logger.warning("PDF 提取的文字為空，可能是掃描版 PDF 或加密 PDF")
@@ -155,6 +201,7 @@ async def analyze_contract(
         "success": True,
         "filename": file.filename,
         "originalText": original_text,
+        "htmlContent": html_content,
         "analysisResult": analysis_result,
         "timestamp": datetime.now().isoformat(),
     }
