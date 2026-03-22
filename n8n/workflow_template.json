@@ -18,13 +18,13 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "http://127.0.0.1:3001/v1/datasets/DATASET_ID_HERE/retrieve",
+        "url": "http://127.0.0.1:3001/v1/datasets/44e5a632-35e1-4669-b3a8-545828d75d53/retrieve",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
             {
               "name": "Authorization",
-              "value": "Bearer DIFY_API_KEY_HERE"
+              "value": "Bearer dataset-BH63uXTBsTfMX1tvPBl3H4Fd"
             },
             {
               "name": "Content-Type",
@@ -35,7 +35,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={\"query\": \"{{ $node['Webhook'].json.body?.text || $node['Webhook'].json.text }}\", \"retrieval_model\": {\"search_method\": \"semantic_similarity\", \"top_k\": 3, \"score_threshold_enabled\": false}}",
+        "body": "={\"query\": \"{{ $json.body.text }}\", \"top_k\": 3}",
         "options": {
           "timeout": 30000
         }

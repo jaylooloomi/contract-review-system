@@ -38,8 +38,8 @@ Dify 的角色：接收合約文字，從知識庫撈出最相關的消保法條
 用 curl 測試（把 KEY 和 ID 換成你的）：
 
 ```bash
-curl -X POST http://127.0.0.1:3001/v1/datasets/DATASET_ID/retrieve \
-  -H "Authorization: Bearer DIFY_API_KEY" \
+curl -X POST http://127.0.0.1:3001/v1/datasets/44e5a632-35e1-4669-b3a8-545828d75d53/retrieve \
+  -H "Authorization: Bearer dataset-BH63uXTBsTfMX1tvPBl3H4Fd" \
   -H "Content-Type: application/json" \
   -d "{\"query\": \"不得退款\", \"retrieval_model\": {\"search_method\": \"semantic_similarity\", \"top_k\": 3, \"score_threshold_enabled\": false}}"
 ```
