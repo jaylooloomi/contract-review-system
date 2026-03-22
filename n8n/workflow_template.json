@@ -18,6 +18,37 @@
     {
       "parameters": {
         "method": "POST",
+        "url": "http://127.0.0.1:3001/v1/datasets/DATASET_ID_HERE/retrieve",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer DIFY_API_KEY_HERE"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={\"query\": \"{{ $node['Webhook'].json.body?.text || $node['Webhook'].json.text }}\", \"retrieval_model\": {\"search_method\": \"semantic_similarity\", \"top_k\": 3, \"score_threshold_enabled\": false}}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "dify-retrieval-node-001",
+      "name": "Dify Retrieval",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
         "url": "http://127.0.0.1:11434/api/generate",
         "sendHeaders": true,
         "headerParameters": {
@@ -31,7 +62,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={\n  \"model\": \"minimax-m2:cloud\",\n  \"prompt\": \"你是台灣消費者保護法專家。請分析以下合約文本，找出所有違反台灣消費者保護法的條款。\\n\\n請以JSON格式回傳，格式如下：\\n{\\\"violations\\\": [{\\\"id\\\": 1, \\\"clause\\\": \\\"條款名稱\\\", \\\"riskLevel\\\": \\\"高/中/低\\\", \\\"reason\\\": \\\"違法原因\\\", \\\"details\\\": \\\"詳細說明\\\"}], \\\"riskScore\\\": 1-10, \\\"totalViolations\\\": N, \\\"summary\\\": \\\"總結\\\"}\\n\\n合約文本：\\n{{ $json.body.text || $json.text }}\",\n  \"stream\": false\n}",
+        "body": "={\n  \"model\": \"minimax-m2:cloud\",\n  \"prompt\": \"你是台灣消費者保護法專家。請分析以下合約文本，找出所有違反台灣消費者保護法的條款。\\n\\n【相關法條參考（來自知識庫）】\\n{{ ($node['Dify Retrieval'].json.records || []).map(r => r.segment && r.segment.content ? r.segment.content : '').filter(s => s).join('\\\\n---\\\\n') || '（知識庫查詢無結果）' }}\\n\\n請以JSON格式回傳，格式如下：\\n{\\\"violations\\\": [{\\\"id\\\": 1, \\\"clause\\\": \\\"條款名稱\\\", \\\"riskLevel\\\": \\\"高/中/低\\\", \\\"reason\\\": \\\"違法原因（引用具體法條）\\\", \\\"details\\\": \\\"詳細說明\\\"}], \\\"riskScore\\\": 1-10, \\\"totalViolations\\\": N, \\\"summary\\\": \\\"總結\\\"}\\n\\n【合約文本】\\n{{ $node['Webhook'].json.body?.text || $node['Webhook'].json.text }}\",\n  \"stream\": false\n}",
         "options": {
           "timeout": 120000
         }
@@ -40,21 +71,32 @@
       "name": "HTTP Request",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [480, 300]
+      "position": [720, 300]
     },
     {
       "parameters": {
-        "jsCode": "// ============================================================\n// n8n Code Node — 合約分析結果解析器\n// 將 Ollama (minimax-m2:cloud) 的回應轉換為結構化 JSON\n// ============================================================\n\n// 1. 取得上游 HTTP Request 節點的資料\nconst ollamaRaw = $node[\"HTTP Request\"].json;\nconst inputText = $node[\"Webhook\"].json.body?.text || $node[\"Webhook\"].json.text || \"\";\n\n// 2. 提取 Ollama 回應文字\nlet responseText = \"\";\nif (ollamaRaw && ollamaRaw.response) {\n  responseText = ollamaRaw.response;\n} else if (ollamaRaw && ollamaRaw.message && ollamaRaw.message.content) {\n  responseText = ollamaRaw.message.content;\n} else if (typeof ollamaRaw === \"string\") {\n  responseText = ollamaRaw;\n}\n\n// 3. 嘗試從回應中解析 JSON\nlet parsedResult = null;\ntry {\n  parsedResult = JSON.parse(responseText);\n} catch (e) {\n  const jsonMatch = responseText.match(/```(?:json)?\\s*([\\s\\S]*?)```/);\n  if (jsonMatch) {\n    try { parsedResult = JSON.parse(jsonMatch[1].trim()); } catch (e2) {}\n  }\n}\n\n// 4. 若解析成功直接使用\nif (parsedResult && Array.isArray(parsedResult.violations)) {\n  const violations = parsedResult.violations.map((v, i) => ({\n    id: v.id || i + 1,\n    clause: v.clause || v.條款 || v.name || \"未知條款\",\n    riskLevel: v.riskLevel || v.risk_level || v.風險等級 || \"中\",\n    reason: v.reason || v.原因 || \"違反消保法\",\n    details: v.details || v.詳細 || v.description || \"\",\n  }));\n  const riskScore = Math.min(10, Math.max(1, Math.round(parsedResult.riskScore || calculateScore(violations))));\n  return [{ json: { violations, riskScore, totalViolations: violations.length, summary: parsedResult.summary || generateSummary(violations, riskScore) } }];\n}\n\n// 5. 備援：關鍵詞匹配\nconst violationPatterns = [\n  { keywords: [\"概不退費\",\"不得退款\",\"不退款\",\"不予退還\",\"無法退費\"], clause: \"不合理退費條款\", riskLevel: \"高\", reason: \"違反消保法第 19 條\", details: \"消費者享有法定退費權利\" },\n  { keywords: [\"自動扣費\",\"自動續約\",\"自動扣款\",\"自動繳費\"], clause: \"自動扣費／自動續約條款\", riskLevel: \"高\", reason: \"違反消保法第 17 條\", details: \"自動扣費需事先取得消費者明確同意\" },\n  { keywords: [\"概不負責\",\"不負任何責任\",\"免除一切責任\",\"不承擔責任\"], clause: \"全面免責條款\", riskLevel: \"高\", reason: \"違反消保法第 7 條\", details: \"不得以契約完全免除責任\" },\n  { keywords: [\"責任限制\",\"賠償上限\",\"最高賠償\",\"賠償不超過\"], clause: \"責任限制條款\", riskLevel: \"中\", reason: \"違反消保法第 7 條\", details: \"賠償上限需合理\" },\n  { keywords: [\"單方修改\",\"隨時修改\",\"有權修改\",\"得修改條款\"], clause: \"單方修改條款\", riskLevel: \"高\", reason: \"違反消保法第 12 條\", details: \"不得單方修改契約\" },\n  { keywords: [\"強制仲裁\",\"不得提起訴訟\",\"放棄訴訟\"], clause: \"強制仲裁條款\", riskLevel: \"高\", reason: \"違反消保法第 10 條\", details: \"消費者不得被強制放棄訴訟權\" },\n];\n\nconst violations = [];\nfor (const p of violationPatterns) {\n  if (p.keywords.some(kw => inputText.includes(kw) || responseText.includes(kw))) {\n    violations.push({ id: violations.length + 1, clause: p.clause, riskLevel: p.riskLevel, reason: p.reason, details: p.details });\n  }\n}\n\nconst riskScore = calculateScore(violations);\nreturn [{ json: { violations, riskScore, totalViolations: violations.length, summary: generateSummary(violations, riskScore) } }];\n\nfunction calculateScore(v) {\n  if (v.length === 0) return 1;\n  let s = 0;\n  for (const x of v) { if (x.riskLevel === \"高\") s += 3; else if (x.riskLevel === \"中\") s += 2; else s += 1; }\n  return Math.min(10, Math.max(1, s));\n}\nfunction generateSummary(v, s) {\n  if (v.length === 0) return `本合約未偵測到明顯違法條款，風險評分 ${s}/10。`;\n  return `本合約共偵測到 ${v.length} 個疑似違法條款，風險評分 ${s}/10。建議簽署前諮詢專業人士。`;\n}"
+        "jsCode": "// ============================================================\n// n8n Code Node v2 — 修正版（相容 n8n v2 資料結構）\n// ============================================================\n\n// 1. 取得 Webhook 傳入的文字（試多個路徑）\nconst webhookJson = $node[\"Webhook\"].json;\nconst inputText =\n  webhookJson?.body?.text ||\n  webhookJson?.text ||\n  webhookJson?.body?.body?.text ||\n  \"\";\n\n// 2. 取得 Ollama 回應文字（試多個路徑）\nconst ollamaJson = $node[\"HTTP Request\"].json;\nlet responseText =\n  ollamaJson?.response ||\n  ollamaJson?.message?.content ||\n  ollamaJson?.choices?.[0]?.message?.content ||\n  \"\";\n\n// 3. 嘗試從 Ollama 回應解析結構化 JSON\nlet parsedResult = null;\nconst cleanText = responseText.replace(/```(?:json)?/g, \"\").replace(/```/g, \"\").trim();\ntry {\n  parsedResult = JSON.parse(cleanText);\n} catch (e) {\n  const m = responseText.match(/\\{[\\s\\S]*\\}/);\n  if (m) {\n    try { parsedResult = JSON.parse(m[0]); } catch (e2) {}\n  }\n}\n\nif (parsedResult && Array.isArray(parsedResult.violations)) {\n  const violations = parsedResult.violations.map((v, i) => ({\n    id: v.id || i + 1,\n    clause: v.clause || v.條款 || \"未知條款\",\n    riskLevel: v.riskLevel || v.風險等級 || \"中\",\n    reason: v.reason || v.原因 || \"違反消保法\",\n    details: v.details || v.詳細 || \"\",\n  }));\n  const score = Math.min(10, Math.max(1, Math.round(parsedResult.riskScore || calcScore(violations))));\n  return [{ json: { violations, riskScore: score, totalViolations: violations.length, summary: parsedResult.summary || genSummary(violations, score) } }];\n}\n\n// 4. 備援：關鍵詞匹配（同時比對 inputText 和 responseText）\nconst searchText = inputText + \" \" + responseText;\n\nconst patterns = [\n  { kws: [\"概不退費\",\"不得退款\",\"不退款\",\"不予退還\",\"無法退費\"], clause: \"不合理退費條款\", level: \"高\", reason: \"違反消保法第19條\", details: \"消費者享有法定退費權利，企業不得以契約剝奪\" },\n  { kws: [\"自動扣費\",\"自動續約\",\"自動扣款\",\"自動繳費\",\"自動延期\"], clause: \"自動扣費／自動續約條款\", level: \"高\", reason: \"違反消保法第17條\", details: \"需事先取得消費者明確書面同意\" },\n  { kws: [\"概不負責\",\"不負任何責任\",\"免除一切責任\",\"不承擔責任\",\"不負責任\"], clause: \"全面免責條款\", level: \"高\", reason: \"違反消保法第7條\", details: \"不得以契約完全免除企業賠償責任\" },\n  { kws: [\"責任限制\",\"賠償上限\",\"最高賠償\",\"賠償不超過\"], clause: \"責任限制條款\", level: \"中\", reason: \"違反消保法第7條\", details: \"賠償上限不得低於消費者實際損害\" },\n  { kws: [\"單方修改\",\"隨時修改\",\"有權修改\",\"得修改條款\",\"修改本合約\"], clause: \"單方修改條款\", level: \"高\", reason: \"違反消保法第12條\", details: \"不得單方面修改契約，需事先通知消費者\" },\n  { kws: [\"強制仲裁\",\"不得提起訴訟\",\"放棄訴訟\",\"不得訴訟\"], clause: \"強制仲裁條款\", level: \"高\", reason: \"違反消保法第10條\", details: \"消費者不得被強制放棄訴訟權利\" },\n  { kws: [\"提供第三方\",\"資料共享\",\"資料轉讓\",\"出售個人資料\"], clause: \"個人資料共享條款\", level: \"中\", reason: \"違反個資法第7條\", details: \"需有明確告知與當事人同意\" },\n];\n\nconst violations = [];\nfor (const p of patterns) {\n  if (p.kws.some(kw => searchText.includes(kw))) {\n    violations.push({ id: violations.length + 1, clause: p.clause, riskLevel: p.level, reason: p.reason, details: p.details });\n  }\n}\n\nconst score = calcScore(violations);\nreturn [{ json: { violations, riskScore: score, totalViolations: violations.length, summary: genSummary(violations, score) } }];\n\n// ── 輔助函式 ──\nfunction calcScore(v) {\n  if (!v.length) return 1;\n  let s = 0;\n  for (const x of v) s += x.riskLevel === \"高\" ? 3 : x.riskLevel === \"中\" ? 2 : 1;\n  return Math.min(10, Math.max(1, s));\n}\nfunction genSummary(v, s) {\n  if (!v.length) return `本合約未偵測到明顯違法條款，風險評分 ${s}/10。`;\n  return `本合約共偵測到 ${v.length} 個疑似違法條款，風險評分 ${s}/10。建議簽署前諮詢專業人士。`;\n}"
       },
       "id": "code-node-001",
       "name": "Code",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [720, 300]
+      "position": [960, 300]
     }
   ],
   "connections": {
     "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Dify Retrieval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dify Retrieval": {
       "main": [
         [
           {
@@ -81,7 +123,7 @@
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "1",
+  "versionId": "2",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "contract-review-system"
