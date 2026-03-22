@@ -37,6 +37,22 @@
 
       <input ref="fileInput" type="file" accept=".pdf" class="hidden" @change="onFileChange" />
 
+      <!-- 地區選擇 -->
+      <div class="mt-6">
+        <p class="text-sm font-medium text-gray-700 mb-2">適用法規地區</p>
+        <div class="flex gap-3 flex-wrap">
+          <label
+            v-for="opt in regionOptions"
+            :key="opt.value"
+            class="flex items-center gap-2 cursor-pointer px-4 py-2 rounded-xl border-2 transition-colors"
+            :class="region === opt.value ? 'border-blue-500 bg-blue-50 text-blue-700 font-semibold' : 'border-gray-200 text-gray-600 hover:border-blue-300'"
+          >
+            <input type="radio" :value="opt.value" v-model="region" class="hidden" />
+            {{ opt.label }}
+          </label>
+        </div>
+      </div>
+
       <!-- 錯誤訊息 -->
       <div v-if="error" class="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
         {{ error }}
@@ -74,6 +90,14 @@ const selectedFile = ref(null)
 const loading = ref(false)
 const error = ref('')
 const dragging = ref(false)
+const region = ref('taiwan')
+
+const regionOptions = [
+  { value: 'taiwan', label: '🇹🇼 台灣' },
+  { value: 'china', label: '🇨🇳 中國' },
+  { value: 'cross', label: '🔗 兩岸' },
+  { value: 'usa', label: '🇺🇸 美國' },
+]
 
 const canUpload = computed(() => selectedFile.value && !loading.value)
 
@@ -114,6 +138,7 @@ async function upload() {
 
   const formData = new FormData()
   formData.append('file', selectedFile.value)
+  formData.append('region', region.value)
 
   try {
     const res = await axios.post('http://127.0.0.1:8000/api/analyze', formData, {

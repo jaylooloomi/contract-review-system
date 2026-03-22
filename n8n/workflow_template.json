@@ -62,7 +62,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={\n  \"model\": \"minimax-m2:cloud\",\n  \"prompt\": \"你是台灣消費者保護法專家。請分析以下合約文本，找出所有違反台灣消費者保護法的條款。\\n\\n【相關法條參考（來自知識庫）】\\n{{ ($node['Dify Retrieval'].json.records || []).map(r => r.segment && r.segment.content ? r.segment.content : '').filter(s => s).join('\\\\n---\\\\n') || '（知識庫查詢無結果）' }}\\n\\n請以JSON格式回傳，格式如下：\\n{\\\"violations\\\": [{\\\"id\\\": 1, \\\"clause\\\": \\\"條款名稱\\\", \\\"riskLevel\\\": \\\"高/中/低\\\", \\\"reason\\\": \\\"違法原因（引用具體法條）\\\", \\\"details\\\": \\\"詳細說明\\\"}], \\\"riskScore\\\": 1-10, \\\"totalViolations\\\": N, \\\"summary\\\": \\\"總結\\\"}\\n\\n【合約文本】\\n{{ $node['Webhook'].json.body?.text || $node['Webhook'].json.text }}\",\n  \"stream\": false\n}",
+        "body": "={\n  \"model\": \"minimax-m2:cloud\",\n  \"prompt\": \"你是消費者合約法律專家。請依據【{{ $node['Webhook1'].json.body?.regionLabel || '台灣消費者保護法' }}】分析以下合約文本，找出所有違反該法規的條款。\\n\\n【相關法條參考（來自知識庫）】\\n{{ ($node['Dify Retrieval'].json.records || []).map(r => r.segment && r.segment.content ? r.segment.content : '').filter(s => s).join('\\\\n---\\\\n') || '（知識庫查詢無結果）' }}\\n\\n請以JSON格式回傳，格式如下：\\n{\\\"violations\\\": [{\\\"id\\\": 1, \\\"clause\\\": \\\"條款名稱\\\", \\\"riskLevel\\\": \\\"高/中/低\\\", \\\"reason\\\": \\\"違法原因（引用具體法條）\\\", \\\"details\\\": \\\"詳細說明\\\"}], \\\"riskScore\\\": 1-10, \\\"totalViolations\\\": N, \\\"summary\\\": \\\"總結\\\"}\\n\\n【合約文本】\\n{{ $node['Webhook1'].json.body?.text || $node['Webhook1'].json.text }}\",\n  \"stream\": false\n}",
         "options": {
           "timeout": 120000
         }
