@@ -1,13 +1,15 @@
 <template>
-  <div class="min-h-screen bg-gray-100">
+  <div class="h-screen flex flex-col bg-gray-100 overflow-hidden">
 
     <!-- Navbar -->
-    <div class="bg-white shadow-sm px-6 py-3 flex items-center gap-3">
-      <button class="text-blue-600 hover:text-blue-800 text-sm flex items-center gap-1" @click="$router.push('/')">
-        ← 返回上傳
-      </button>
-      <span class="text-gray-400 text-sm">|</span>
-      <span class="text-gray-600 text-sm font-medium">{{ result?.filename }}</span>
+    <div class="bg-white shadow-sm shrink-0">
+      <div class="py-3 px-6 flex items-center gap-3">
+        <button class="text-blue-600 hover:text-blue-800 text-sm flex items-center gap-1" @click="$router.push('/')">
+          ← 返回上傳
+        </button>
+        <span class="text-gray-400 text-sm">|</span>
+        <span class="text-gray-600 text-sm font-medium truncate">{{ result?.filename }}</span>
+      </div>
     </div>
 
     <div v-if="!result" class="text-center text-gray-500 py-20">
@@ -15,97 +17,120 @@
       <button class="mt-4 text-blue-600 underline" @click="$router.push('/')">返回上傳</button>
     </div>
 
-    <div v-else class="p-6 max-w-screen-xl mx-auto space-y-5">
+    <div v-else class="flex flex-col flex-1 overflow-hidden">
 
-      <!-- Dashboard Cards -->
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div class="bg-white rounded-2xl shadow p-5 flex flex-col items-center justify-center gap-2">
-          <div class="w-16 h-16 rounded-full flex items-center justify-center text-2xl font-bold text-white" :class="scoreColor">
-            {{ analysis.riskScore }}
+      <!-- Dashboard 4 卡片 -->
+      <div class="flex justify-center px-6 py-3 shrink-0">
+        <div class="flex gap-3 w-full max-w-3xl">
+          <!-- 風險評分 -->
+          <div class="flex-1 bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+            <p class="text-xs text-gray-400 mb-1">風險評分</p>
+            <p class="text-2xl font-bold" :class="scoreColor">{{ analysis.riskScore ?? '-' }}<span class="text-sm font-normal text-gray-400">/10</span></p>
           </div>
-          <p class="text-xs text-gray-500 font-medium">風險評分</p>
-        </div>
-        <div class="bg-white rounded-2xl shadow p-5 flex flex-col items-center justify-center gap-2">
-          <p class="text-2xl font-bold text-gray-800">{{ analysis.contractType || '一般合約' }}</p>
-          <p class="text-xs text-gray-500 font-medium">合約類型</p>
-        </div>
-        <div class="bg-white rounded-2xl shadow p-5 flex flex-col items-center justify-center gap-2">
-          <div class="flex flex-wrap gap-1 justify-center">
-            <span v-for="law in displayLaws" :key="law" class="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">{{ law }}</span>
+          <!-- 合約類型 -->
+          <div class="flex-1 bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+            <p class="text-xs text-gray-400 mb-1">合約類型</p>
+            <p class="text-base font-bold text-gray-800 leading-tight">{{ analysis.contractType || '一般合約' }}</p>
           </div>
-          <p class="text-xs text-gray-500 font-medium mt-1">適用法規</p>
-        </div>
-        <div class="bg-white rounded-2xl shadow p-5 flex flex-col items-center justify-center gap-2">
-          <p class="text-4xl font-bold" :class="analysis.totalViolations > 0 ? 'text-red-500' : 'text-green-500'">
-            {{ analysis.totalViolations }}
-          </p>
-          <p class="text-xs text-gray-500 font-medium">疑似違法條款</p>
+          <!-- 適用法規 -->
+          <div class="flex-1 bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+            <p class="text-xs text-gray-400 mb-1">適用法規</p>
+            <p class="text-base font-bold text-gray-800 leading-tight">
+              {{ displayLaws.length > 0 ? displayLaws.join(' + ') : '—' }}
+            </p>
+          </div>
+          <!-- 違法條款 -->
+          <div class="flex-1 bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+            <p class="text-xs text-gray-400 mb-1">違法條款</p>
+            <p class="text-2xl font-bold" :class="analysis.totalViolations > 0 ? 'text-red-500' : 'text-green-500'">
+              {{ analysis.totalViolations ?? 0 }}<span class="text-sm font-normal text-gray-400"> 條</span>
+            </p>
+          </div>
         </div>
       </div>
 
       <!-- 摘要 -->
-      <div class="bg-white rounded-2xl shadow px-6 py-4 text-sm text-gray-700 leading-relaxed">
-        <span class="font-semibold text-gray-800 mr-2">分析摘要</span>{{ analysis.summary }}
+      <div class="flex justify-center px-6 shrink-0 pb-2">
+        <div class="bg-white/80 rounded-xl px-5 py-2 text-xs text-gray-600 leading-relaxed shadow-sm w-full max-w-3xl">
+          <span class="font-semibold text-gray-700 mr-2">分析摘要</span>{{ analysis.summary }}
+        </div>
       </div>
 
-      <!-- 主內容：左右分割 -->
-      <div class="flex gap-5 items-start">
+      <!-- PDF 全寬區域 -->
+      <div class="flex-1 relative overflow-hidden">
 
-        <!-- 左：PDF 原文 iframe -->
-        <div class="w-1/2 bg-white rounded-2xl shadow p-5 sticky top-6">
-          <div class="flex items-center justify-between mb-3">
-            <h3 class="font-bold text-gray-800 text-sm">合約原文</h3>
-            <div class="flex gap-3 text-xs text-gray-400">
-              <span class="flex items-center gap-1"><span class="w-3 h-3 rounded inline-block highlight-high-demo"></span>高風險</span>
-              <span class="flex items-center gap-1"><span class="w-3 h-3 rounded inline-block highlight-mid-demo"></span>中風險</span>
-            </div>
-          </div>
-          <iframe
-            v-if="pdfHtml"
-            ref="pdfIframe"
-            class="w-full rounded-lg border border-gray-100"
-            style="height: 65vh;"
-            @load="onIframeLoad"
-          ></iframe>
-          <div v-else class="text-center text-gray-400 py-10 text-sm">無法載入合約原文</div>
+        <!-- PDF iframe -->
+        <iframe
+          v-if="pdfHtml"
+          ref="pdfIframe"
+          class="w-full h-full border-0"
+          @load="onIframeLoad"
+        ></iframe>
+        <div v-else class="flex items-center justify-center h-full text-gray-400 text-sm bg-white">
+          無法載入合約原文
         </div>
 
-        <!-- 右：違法條款卡片 -->
-        <div class="w-1/2">
-          <h3 class="font-bold text-gray-800 mb-3 text-sm">違法條款分析
-            <span class="text-gray-400 font-normal text-xs ml-2">點擊條款可定位原文</span>
-          </h3>
+        <!-- 右側滑出抽屜面板 -->
+        <div
+          class="fixed top-0 bottom-0 right-0 flex flex-row z-20"
+          :style="panelStyle"
+        >
+          <!-- Tab 收合按鈕 -->
+          <div
+            class="w-10 shrink-0 flex flex-col items-center justify-center gap-2 cursor-pointer bg-white/90 backdrop-blur-sm border-l border-t border-b border-gray-200 rounded-l-2xl shadow-lg py-6 select-none"
+            @click="isOpen = !isOpen"
+          >
+            <span class="text-base">⚠️</span>
+            <span class="text-gray-600 text-xs font-bold leading-none" style="writing-mode: vertical-rl; letter-spacing: 0.2em">違法條款</span>
+            <span class="text-gray-400 text-xs mt-1">{{ isOpen ? '›' : '‹' }}</span>
+          </div>
 
-          <div v-if="analysis.violations?.length > 0" class="space-y-4">
-            <div
-              v-for="v in analysis.violations"
-              :key="v.id"
-              class="bg-white rounded-2xl shadow p-5 border-l-4 cursor-pointer transition-all duration-200"
-              :class="[
-                riskBorder(v.riskLevel),
-                activeViolationId === v.id ? 'ring-2 ring-blue-400 shadow-lg' : 'hover:shadow-md'
-              ]"
-              @click="scrollToViolation(v)"
-            >
-              <div class="flex flex-wrap items-center gap-2 mb-2">
-                <span class="text-xs font-bold px-2.5 py-0.5 rounded-full" :class="riskBadge(v.riskLevel)">{{ v.riskLevel }}風險</span>
-                <span v-if="extractLaw(v.reason, v.details)" class="text-xs bg-indigo-100 text-indigo-700 px-2.5 py-0.5 rounded-full font-medium">{{ extractLaw(v.reason, v.details) }}</span>
+          <!-- 面板內容 -->
+          <div class="flex flex-col w-[340px] bg-white/95 backdrop-blur-sm rounded-tr-2xl rounded-br-2xl shadow-2xl border border-gray-100 overflow-hidden">
+            <!-- 面板標題 -->
+            <div class="px-4 py-3 border-b border-gray-100 shrink-0">
+              <div class="flex items-center justify-between">
+                <h3 class="font-bold text-gray-800 text-sm">違法條款分析</h3>
+                <span class="text-gray-400 font-normal text-xs">點擊定位原文</span>
               </div>
-              <h4 class="font-bold text-gray-800 text-base">{{ v.clause }}</h4>
-              <p class="text-sm text-gray-600 mt-1">{{ v.reason }}</p>
-              <p class="text-sm text-gray-500 mt-3 pt-3 border-t leading-relaxed">{{ v.details }}</p>
+              <div class="flex gap-3 text-xs text-gray-400 mt-1.5">
+                <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-sm inline-block highlight-high-demo"></span>高風險</span>
+                <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-sm inline-block highlight-mid-demo"></span>中風險</span>
+              </div>
             </div>
-          </div>
 
-          <div v-else class="bg-green-50 rounded-2xl p-8 text-center text-green-700">
-            <div class="text-4xl mb-3">✅</div>
-            <p class="font-semibold">未偵測到明顯違法條款</p>
-          </div>
+            <!-- 卡片列表 -->
+            <div class="flex-1 overflow-y-auto px-3 py-3 space-y-2.5">
+              <div
+                v-for="v in analysis.violations"
+                :key="v.id"
+                class="rounded-xl border border-gray-100 shadow-sm p-3.5 border-l-4 cursor-pointer transition-all duration-200"
+                :class="[
+                  riskBorder(v.riskLevel),
+                  activeViolationId === v.id ? 'ring-2 ring-blue-400 shadow-md bg-blue-50/30' : 'hover:shadow-md bg-white'
+                ]"
+                @click="scrollToViolation(v)"
+              >
+                <div class="flex flex-wrap items-center gap-1.5 mb-1.5">
+                  <span class="text-xs font-bold px-2 py-0.5 rounded-full" :class="riskBadge(v.riskLevel)">{{ v.riskLevel }}風險</span>
+                  <span v-if="extractLaw(v.reason, v.details)" class="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-medium">{{ extractLaw(v.reason, v.details) }}</span>
+                </div>
+                <h4 class="font-bold text-gray-800 text-sm leading-tight">{{ v.clause }}</h4>
+                <p class="text-xs text-gray-500 mt-1.5 leading-relaxed">{{ v.details }}</p>
+              </div>
 
-          <div class="mt-5 text-center">
-            <button class="px-6 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 font-semibold text-sm" @click="$router.push('/')">
-              分析另一份合約
-            </button>
+              <div v-if="!(analysis.violations?.length > 0)" class="bg-green-50 rounded-xl p-6 text-center text-green-700">
+                <div class="text-2xl mb-1">✅</div>
+                <p class="font-semibold text-sm">未偵測到明顯違法條款</p>
+              </div>
+            </div>
+
+            <!-- 底部按鈕 -->
+            <div class="px-3 py-3 border-t border-gray-100 shrink-0">
+              <button class="w-full py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 font-semibold text-xs" @click="$router.push('/')">
+                分析另一份合約
+              </button>
+            </div>
           </div>
         </div>
 
@@ -115,7 +140,7 @@
 </template>
 
 <script setup>
-import { computed, ref, nextTick } from 'vue'
+import { computed, ref, nextTick, onMounted } from 'vue'
 
 const raw = sessionStorage.getItem('analysisResult')
 const result = raw ? JSON.parse(raw) : null
@@ -125,6 +150,15 @@ const pdfHtml = sessionStorage.getItem('pdfHtml') || ''
 const pdfIframe = ref(null)
 const activeViolationId = ref(null)
 const iframeReady = ref(false)
+
+// 抽屜開關：桌機預設展開，手機預設收合
+const isOpen = ref(typeof window !== 'undefined' ? window.innerWidth >= 768 : true)
+
+// 面板滑入/滑出動畫：收合時只露出 40px tab
+const panelStyle = computed(() => ({
+  transform: isOpen.value ? 'translateX(0)' : 'translateX(340px)',
+  transition: 'transform 0.3s ease',
+}))
 
 const LAW_NAMES = {
   taiwan_consumer_protection_law: '消費者保護法',
@@ -148,9 +182,9 @@ const displayLaws = computed(() => {
 
 const scoreColor = computed(() => {
   const s = analysis.riskScore || 0
-  if (s >= 7) return 'bg-red-500'
-  if (s >= 4) return 'bg-yellow-500'
-  return 'bg-green-500'
+  if (s >= 7) return 'text-red-500'
+  if (s >= 4) return 'text-yellow-500'
+  return 'text-green-500'
 })
 
 function riskBorder(level) {
@@ -202,19 +236,10 @@ function getKeywords(v) {
   return [...new Set(keywords.filter(Boolean))]
 }
 
-// iframe 載入後寫入 HTML
 function onIframeLoad() {
-  const iframe = pdfIframe.value
-  if (!iframe) return
-  const doc = iframe.contentDocument || iframe.contentWindow?.document
-  if (!doc) return
-  doc.open()
-  doc.write(pdfHtml)
-  doc.close()
   iframeReady.value = true
 }
 
-// 點擊卡片：在 iframe 內高亮並捲動
 function scrollToViolation(v) {
   activeViolationId.value = v.id
   const iframe = pdfIframe.value
@@ -225,37 +250,41 @@ function scrollToViolation(v) {
   const keywords = getKeywords(v)
   const cls = v.riskLevel === '高' ? 'highlight-high' : 'highlight-mid'
 
-  // 清除上一次高亮
-  doc.querySelectorAll('.pdf-block.highlight-high, .pdf-block.highlight-mid, .pdf-block.highlight-active').forEach(el => {
+  doc.querySelectorAll('.t.highlight-high, .t.highlight-mid, .t.highlight-active').forEach(el => {
     el.classList.remove('highlight-high', 'highlight-mid', 'highlight-active')
   })
 
-  // 找符合關鍵字的 block 並高亮
   let firstMatch = null
-  doc.querySelectorAll('.pdf-block').forEach(block => {
-    const text = block.textContent || ''
+  doc.querySelectorAll('.t').forEach(el => {
+    const text = el.textContent || ''
     if (keywords.some(kw => text.includes(kw))) {
-      block.classList.add(cls, 'highlight-active')
-      if (!firstMatch) firstMatch = block
+      el.classList.add(cls, 'highlight-active')
+      if (!firstMatch) firstMatch = el
     }
   })
 
-  if (firstMatch) firstMatch.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  if (firstMatch) {
+    const container = doc.getElementById('page-container')
+    if (container) {
+      const elRect = firstMatch.getBoundingClientRect()
+      const containerRect = container.getBoundingClientRect()
+      container.scrollTop += elRect.top - containerRect.top - container.clientHeight / 2
+    } else {
+      firstMatch.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+  }
 }
 
-// 設定 iframe srcdoc（Vue 掛載後）
-import { onMounted } from 'vue'
 onMounted(() => {
   nextTick(() => {
     const iframe = pdfIframe.value
     if (!iframe || !pdfHtml) return
-    // 用 srcdoc 觸發 load 事件
-    iframe.srcdoc = '<!DOCTYPE html><html><body></body></html>'
+    iframe.srcdoc = pdfHtml
   })
 })
 </script>
 
 <style scoped>
-.highlight-high-demo { background-color: rgba(252,165,165,0.55); border: 1px solid #fca5a5; }
-.highlight-mid-demo { background-color: rgba(253,224,71,0.55); border: 1px solid #fde047; }
+.highlight-high-demo { background-color: rgba(252,165,165,0.7); border: 1px solid #fca5a5; }
+.highlight-mid-demo { background-color: rgba(253,224,71,0.7); border: 1px solid #fde047; }
 </style>

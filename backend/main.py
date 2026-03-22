@@ -2,7 +2,10 @@ import os
 import logging
 import httpx
 import pdfplumber
-import fitz  # pymupdf
+import asyncio
+import subprocess
+import tempfile
+import shutil
 from datetime import datetime
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -58,52 +61,69 @@ def extract_text_from_pdf(file_bytes: bytes) -> str:
         raise HTTPException(status_code=422, detail=f"無法解析 PDF 檔案: {str(e)}")
 
 
-def extract_html_from_pdf(file_bytes: bytes) -> str:
-    """使用 pymupdf 將 PDF 轉換為清潔的 HTML（正常排版，方便前端高亮）"""
+def _run_pdf2html_docker(file_bytes: bytes) -> str:
+    """在 thread 中執行 Docker pdf2htmlEX 轉換（避免 uvicorn asyncio 相容性問題）"""
+    tmp_dir = tempfile.mkdtemp(dir=r"C:\contract-review-system\tmp")
     try:
-        doc = fitz.open(stream=file_bytes, filetype="pdf")
-        pages_html = []
-        for page_num, page in enumerate(doc):
-            blocks = page.get_text("dict")["blocks"]
-            page_html = f'<div class="pdf-page" id="page-{page_num}">'
-            for block_num, block in enumerate(blocks):
-                if block.get("type") != 0:
-                    continue
-                block_id = f"p{page_num}-b{block_num}"
-                block_html = f'<div class="pdf-block" id="{block_id}">'
-                for line in block.get("lines", []):
-                    line_html = '<span class="pdf-line">'
-                    for span in line.get("spans", []):
-                        text = span.get("text", "")
-                        size = span.get("size", 12)
-                        flags = span.get("flags", 0)
-                        bold = "font-weight:bold;" if flags & (1 << 4) else ""
-                        italic = "font-style:italic;" if flags & (1 << 1) else ""
-                        style = f"font-size:{size:.1f}pt;{bold}{italic}"
-                        line_html += f'<span style="{style}">{text}</span>'
-                    line_html += '</span><br>'
-                    block_html += line_html
-                block_html += '</div>'
-                page_html += block_html
-            page_html += '</div>'
-            pages_html.append(page_html)
-        doc.close()
+        pdf_path = os.path.join(tmp_dir, "input.pdf")
+        html_path = os.path.join(tmp_dir, "output.html")
 
-        css = """<style>
-body { font-family: serif; margin: 16px; background: #fff; }
-.pdf-page { margin-bottom: 32px; padding-bottom: 24px; border-bottom: 2px solid #e5e7eb; }
-.pdf-block { margin-bottom: 6px; line-height: 1.7; }
-.pdf-line { display: inline; }
-.highlight-high { background-color: rgba(252,165,165,0.55); border-radius: 3px; }
-.highlight-mid { background-color: rgba(253,224,71,0.55); border-radius: 3px; }
-.highlight-active { outline: 2px solid #3b82f6; outline-offset: 2px; }
+        with open(pdf_path, "wb") as f:
+            f.write(file_bytes)
+
+        # Windows 路徑轉換為 Docker volume 格式（C:\foo -> /c/foo）
+        mount_path = tmp_dir.replace("\\", "/")
+        if len(mount_path) >= 2 and mount_path[1] == ":":
+            mount_path = "/" + mount_path[0].lower() + mount_path[2:]
+
+        docker_exe = r"C:\Program Files\Docker\Docker\resources\bin\docker.exe"
+        result = subprocess.run(
+            [
+                docker_exe, "run", "--rm",
+                "-v", mount_path + ":/pdf",
+                "--entrypoint", "sh",
+                "iapain/pdf2htmlex",
+                "-c", "cd /pdf && pdf2htmlEX --zoom 1.3 input.pdf output.html",
+            ],
+            capture_output=True,
+            timeout=120,
+        )
+
+        if result.returncode != 0:
+            logger.error(f"pdf2htmlEX 失敗: {result.stderr.decode()}")
+            return ""
+
+        if not os.path.exists(html_path):
+            logger.error("pdf2htmlEX 未產生 HTML 檔案")
+            return ""
+
+        with open(html_path, "r", encoding="utf-8") as f:
+            html = f.read()
+
+        # 注入高亮 CSS
+        highlight_css = """<style>
+.highlight-high { background-color: rgba(252,165,165,0.7) !important; border-radius: 2px; }
+.highlight-mid { background-color: rgba(253,224,71,0.7) !important; border-radius: 2px; }
+.highlight-active { outline: 3px solid #3b82f6 !important; outline-offset: 1px; }
 </style>"""
-        full_html = css + "\n".join(pages_html)
-        logger.info(f"PDF 轉 HTML 完成，共 {len(pages_html)} 頁，{len(full_html)} 字元")
-        return full_html
-    except Exception as e:
-        logger.error(f"PDF 轉 HTML 失敗: {e}")
+        html = html.replace("</head>", highlight_css + "</head>")
+        logger.info(f"pdf2htmlEX 轉換完成，HTML: {len(html)} 字元")
+        return html
+
+    except subprocess.TimeoutExpired:
+        logger.error("pdf2htmlEX Docker 執行逾時（120秒）")
         return ""
+    except Exception as e:
+        logger.error(f"pdf2htmlEX 失敗: {e}")
+        return ""
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+async def extract_html_from_pdf(file_bytes: bytes) -> str:
+    """在 thread executor 中執行 Docker 轉換，不阻塞 uvicorn event loop"""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _run_pdf2html_docker, file_bytes)
 
 
 REGION_LABEL = {
@@ -186,8 +206,8 @@ async def analyze_contract(
     # 提取 PDF 文字與 HTML
     logger.info("開始提取 PDF 文字...")
     original_text = extract_text_from_pdf(file_bytes)
-    logger.info("開始轉換 PDF 為 HTML...")
-    html_content = extract_html_from_pdf(file_bytes)
+    logger.info("開始轉換 PDF 為 HTML（Docker pdf2htmlEX）...")
+    html_content = await extract_html_from_pdf(file_bytes)
 
     if not original_text.strip():
         logger.warning("PDF 提取的文字為空，可能是掃描版 PDF 或加密 PDF")

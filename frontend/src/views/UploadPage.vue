@@ -146,7 +146,8 @@ async function upload() {
       timeout: 120000,
     })
     const { htmlContent, ...rest } = res.data
-    sessionStorage.setItem('analysisResult', JSON.stringify(rest))
+    sessionStorage.setItem('analysisResult', JSON.stringify({ ...rest, filename: selectedFile.value.name }))
+    sessionStorage.removeItem('pdfHtml')
     if (htmlContent) sessionStorage.setItem('pdfHtml', htmlContent)
     router.push('/annotation')
   } catch (e) {

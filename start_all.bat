@@ -26,6 +26,22 @@ if errorlevel 1 (
 echo     [OK] Docker ready
 echo.
 
+:: --- 1.5. pdf2htmlEX Image ---
+echo [1.5/6] Checking pdf2htmlEX Docker image...
+docker image inspect iapain/pdf2htmlex >nul 2>&1
+if errorlevel 1 (
+    echo     Image not found, pulling iapain/pdf2htmlex...
+    docker pull iapain/pdf2htmlex
+    if errorlevel 1 (
+        echo     [ERROR] Failed to pull iapain/pdf2htmlex, PDF conversion will not work
+    ) else (
+        echo     [OK] iapain/pdf2htmlex pulled successfully
+    )
+) else (
+    echo     [OK] iapain/pdf2htmlex image already exists
+)
+echo.
+
 :: --- 2. Dify ---
 echo [2/6] Starting Dify (Docker Compose)...
 set DIFY_PATH=C:\dify\dify\docker
