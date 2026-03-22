@@ -2,8 +2,12 @@ import os
 import logging
 import httpx
 import pdfplumber
+import asyncio
+import subprocess
+import tempfile
+import shutil
 from datetime import datetime
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, Form, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import io
@@ -31,12 +35,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://127.0.0.1:5173",
-        "http://localhost:5173",
-        "http://127.0.0.1:3000",
-        "http://localhost:3000",
-    ],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -62,11 +61,85 @@ def extract_text_from_pdf(file_bytes: bytes) -> str:
         raise HTTPException(status_code=422, detail=f"無法解析 PDF 檔案: {str(e)}")
 
 
-async def call_n8n_webhook(text: str, filename: str) -> dict:
+def _run_pdf2html_docker(file_bytes: bytes) -> str:
+    """在 thread 中執行 Docker pdf2htmlEX 轉換（避免 uvicorn asyncio 相容性問題）"""
+    tmp_dir = tempfile.mkdtemp(dir=r"C:\contract-review-system\tmp")
+    try:
+        pdf_path = os.path.join(tmp_dir, "input.pdf")
+        html_path = os.path.join(tmp_dir, "output.html")
+
+        with open(pdf_path, "wb") as f:
+            f.write(file_bytes)
+
+        # Windows 路徑轉換為 Docker volume 格式（C:\foo -> /c/foo）
+        mount_path = tmp_dir.replace("\\", "/")
+        if len(mount_path) >= 2 and mount_path[1] == ":":
+            mount_path = "/" + mount_path[0].lower() + mount_path[2:]
+
+        docker_exe = r"C:\Program Files\Docker\Docker\resources\bin\docker.exe"
+        result = subprocess.run(
+            [
+                docker_exe, "run", "--rm",
+                "-v", mount_path + ":/pdf",
+                "--entrypoint", "sh",
+                "iapain/pdf2htmlex",
+                "-c", "cd /pdf && pdf2htmlEX --zoom 1.3 input.pdf output.html",
+            ],
+            capture_output=True,
+            timeout=120,
+        )
+
+        if result.returncode != 0:
+            logger.error(f"pdf2htmlEX 失敗: {result.stderr.decode()}")
+            return ""
+
+        if not os.path.exists(html_path):
+            logger.error("pdf2htmlEX 未產生 HTML 檔案")
+            return ""
+
+        with open(html_path, "r", encoding="utf-8") as f:
+            html = f.read()
+
+        # 注入高亮 CSS
+        highlight_css = """<style>
+.highlight-high { background-color: rgba(252,165,165,0.7) !important; border-radius: 2px; }
+.highlight-mid { background-color: rgba(253,224,71,0.7) !important; border-radius: 2px; }
+.highlight-active { outline: 3px solid #3b82f6 !important; outline-offset: 1px; }
+</style>"""
+        html = html.replace("</head>", highlight_css + "</head>")
+        logger.info(f"pdf2htmlEX 轉換完成，HTML: {len(html)} 字元")
+        return html
+
+    except subprocess.TimeoutExpired:
+        logger.error("pdf2htmlEX Docker 執行逾時（120秒）")
+        return ""
+    except Exception as e:
+        logger.error(f"pdf2htmlEX 失敗: {e}")
+        return ""
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+async def extract_html_from_pdf(file_bytes: bytes) -> str:
+    """在 thread executor 中執行 Docker 轉換，不阻塞 uvicorn event loop"""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _run_pdf2html_docker, file_bytes)
+
+
+REGION_LABEL = {
+    "taiwan": "台灣消費者保護法",
+    "china": "中國消費者權益保護法",
+    "cross": "兩岸相關法規（台灣消保法及中國消費者權益保護法）",
+    "usa": "美國聯邦消費者保護法（FTC Act、CCPA 等）",
+}
+
+
+async def call_n8n_webhook(text: str, filename: str, region: str = "taiwan") -> dict:
     """呼叫 n8n webhook 進行合約分析"""
     # 將換行符轉為空格，避免 n8n raw JSON body 因換行而失效
     clean_text = text.replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
-    payload = {"text": clean_text, "filename": filename}
+    region_label = REGION_LABEL.get(region, REGION_LABEL["taiwan"])
+    payload = {"text": clean_text, "filename": filename, "region": region, "regionLabel": region_label}
     logger.info(f"呼叫 n8n webhook: {N8N_WEBHOOK_URL}")
     logger.info(f"傳送文字長度: {len(text)} 字元")
 
@@ -102,7 +175,10 @@ async def health_check():
 
 
 @app.post("/api/analyze", summary="分析合約 PDF")
-async def analyze_contract(file: UploadFile = File(..., description="要分析的合約 PDF 檔案")):
+async def analyze_contract(
+    file: UploadFile = File(..., description="要分析的合約 PDF 檔案"),
+    region: str = Form("taiwan", description="適用法規地區（taiwan/china/cross/usa）"),
+):
     """
     接收 PDF 合約檔案，提取文字後透過 n8n + Ollama 分析違法條款。
 
@@ -127,9 +203,11 @@ async def analyze_contract(file: UploadFile = File(..., description="要分析�
     if file_size_mb > MAX_FILE_SIZE_MB:
         raise HTTPException(status_code=413, detail=f"檔案大小超過限制（最大 {MAX_FILE_SIZE_MB} MB）")
 
-    # 提取 PDF 文字
+    # 提取 PDF 文字與 HTML
     logger.info("開始提取 PDF 文字...")
     original_text = extract_text_from_pdf(file_bytes)
+    logger.info("開始轉換 PDF 為 HTML（Docker pdf2htmlEX）...")
+    html_content = await extract_html_from_pdf(file_bytes)
 
     if not original_text.strip():
         logger.warning("PDF 提取的文字為空，可能是掃描版 PDF 或加密 PDF")
@@ -137,12 +215,13 @@ async def analyze_contract(file: UploadFile = File(..., description="要分析�
 
     # 呼叫 n8n 分析
     logger.info("開始呼叫 n8n 進行分析...")
-    analysis_result = await call_n8n_webhook(original_text, file.filename)
+    analysis_result = await call_n8n_webhook(original_text, file.filename, region)
 
     response_data = {
         "success": True,
         "filename": file.filename,
         "originalText": original_text,
+        "htmlContent": html_content,
         "analysisResult": analysis_result,
         "timestamp": datetime.now().isoformat(),
     }
