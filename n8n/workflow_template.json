@@ -1,0 +1,91 @@
+{
+  "name": "Contract Analysis",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "analyze",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "webhook-node-001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "contract-analyze"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:11434/api/generate",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={\n  \"model\": \"minimax-m2:cloud\",\n  \"prompt\": \"你是台灣消費者保護法專家。請分析以下合約文本，找出所有違反台灣消費者保護法的條款。\\n\\n請以JSON格式回傳，格式如下：\\n{\\\"violations\\\": [{\\\"id\\\": 1, \\\"clause\\\": \\\"條款名稱\\\", \\\"riskLevel\\\": \\\"高/中/低\\\", \\\"reason\\\": \\\"違法原因\\\", \\\"details\\\": \\\"詳細說明\\\"}], \\\"riskScore\\\": 1-10, \\\"totalViolations\\\": N, \\\"summary\\\": \\\"總結\\\"}\\n\\n合約文本：\\n{{ $json.body.text || $json.text }}\",\n  \"stream\": false\n}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "http-request-node-001",
+      "name": "HTTP Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// n8n Code Node — 合約分析結果解析器\n// 將 Ollama (minimax-m2:cloud) 的回應轉換為結構化 JSON\n// ============================================================\n\n// 1. 取得上游 HTTP Request 節點的資料\nconst ollamaRaw = $node[\"HTTP Request\"].json;\nconst inputText = $node[\"Webhook\"].json.body?.text || $node[\"Webhook\"].json.text || \"\";\n\n// 2. 提取 Ollama 回應文字\nlet responseText = \"\";\nif (ollamaRaw && ollamaRaw.response) {\n  responseText = ollamaRaw.response;\n} else if (ollamaRaw && ollamaRaw.message && ollamaRaw.message.content) {\n  responseText = ollamaRaw.message.content;\n} else if (typeof ollamaRaw === \"string\") {\n  responseText = ollamaRaw;\n}\n\n// 3. 嘗試從回應中解析 JSON\nlet parsedResult = null;\ntry {\n  parsedResult = JSON.parse(responseText);\n} catch (e) {\n  const jsonMatch = responseText.match(/```(?:json)?\\s*([\\s\\S]*?)```/);\n  if (jsonMatch) {\n    try { parsedResult = JSON.parse(jsonMatch[1].trim()); } catch (e2) {}\n  }\n}\n\n// 4. 若解析成功直接使用\nif (parsedResult && Array.isArray(parsedResult.violations)) {\n  const violations = parsedResult.violations.map((v, i) => ({\n    id: v.id || i + 1,\n    clause: v.clause || v.條款 || v.name || \"未知條款\",\n    riskLevel: v.riskLevel || v.risk_level || v.風險等級 || \"中\",\n    reason: v.reason || v.原因 || \"違反消保法\",\n    details: v.details || v.詳細 || v.description || \"\",\n  }));\n  const riskScore = Math.min(10, Math.max(1, Math.round(parsedResult.riskScore || calculateScore(violations))));\n  return [{ json: { violations, riskScore, totalViolations: violations.length, summary: parsedResult.summary || generateSummary(violations, riskScore) } }];\n}\n\n// 5. 備援：關鍵詞匹配\nconst violationPatterns = [\n  { keywords: [\"概不退費\",\"不得退款\",\"不退款\",\"不予退還\",\"無法退費\"], clause: \"不合理退費條款\", riskLevel: \"高\", reason: \"違反消保法第 19 條\", details: \"消費者享有法定退費權利\" },\n  { keywords: [\"自動扣費\",\"自動續約\",\"自動扣款\",\"自動繳費\"], clause: \"自動扣費／自動續約條款\", riskLevel: \"高\", reason: \"違反消保法第 17 條\", details: \"自動扣費需事先取得消費者明確同意\" },\n  { keywords: [\"概不負責\",\"不負任何責任\",\"免除一切責任\",\"不承擔責任\"], clause: \"全面免責條款\", riskLevel: \"高\", reason: \"違反消保法第 7 條\", details: \"不得以契約完全免除責任\" },\n  { keywords: [\"責任限制\",\"賠償上限\",\"最高賠償\",\"賠償不超過\"], clause: \"責任限制條款\", riskLevel: \"中\", reason: \"違反消保法第 7 條\", details: \"賠償上限需合理\" },\n  { keywords: [\"單方修改\",\"隨時修改\",\"有權修改\",\"得修改條款\"], clause: \"單方修改條款\", riskLevel: \"高\", reason: \"違反消保法第 12 條\", details: \"不得單方修改契約\" },\n  { keywords: [\"強制仲裁\",\"不得提起訴訟\",\"放棄訴訟\"], clause: \"強制仲裁條款\", riskLevel: \"高\", reason: \"違反消保法第 10 條\", details: \"消費者不得被強制放棄訴訟權\" },\n];\n\nconst violations = [];\nfor (const p of violationPatterns) {\n  if (p.keywords.some(kw => inputText.includes(kw) || responseText.includes(kw))) {\n    violations.push({ id: violations.length + 1, clause: p.clause, riskLevel: p.riskLevel, reason: p.reason, details: p.details });\n  }\n}\n\nconst riskScore = calculateScore(violations);\nreturn [{ json: { violations, riskScore, totalViolations: violations.length, summary: generateSummary(violations, riskScore) } }];\n\nfunction calculateScore(v) {\n  if (v.length === 0) return 1;\n  let s = 0;\n  for (const x of v) { if (x.riskLevel === \"高\") s += 3; else if (x.riskLevel === \"中\") s += 2; else s += 1; }\n  return Math.min(10, Math.max(1, s));\n}\nfunction generateSummary(v, s) {\n  if (v.length === 0) return `本合約未偵測到明顯違法條款，風險評分 ${s}/10。`;\n  return `本合約共偵測到 ${v.length} 個疑似違法條款，風險評分 ${s}/10。建議簽署前諮詢專業人士。`;\n}"
+      },
+      "id": "code-node-001",
+      "name": "Code",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "contract-review-system"
+  },
+  "id": "contract-analysis-workflow",
+  "tags": []
+}
