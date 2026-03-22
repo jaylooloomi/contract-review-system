@@ -40,7 +40,9 @@
       "Bash(curl -s -X POST http://localhost:5678/webhook/analyze -H \"Content-Type: application/json\" -d \"{\"\"text\"\": \"\"第一條 退費條款 租客不得退款 第二條 責任限制 房東無責任\"\", \"\"filename\"\": \"\"test.pdf\"\"}\" --max-time 30)",
       "Bash(curl -s http://127.0.0.1:11434/api/tags)",
       "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); [print\\(m[''''name'''']\\) for m in d.get\\(''''models'''',[]\\)]\")",
-      "mcp__Desktop_Commander__list_directory"
+      "mcp__Desktop_Commander__list_directory",
+      "Bash(gh repo:*)",
+      "WebFetch(domain:github.com)"
     ]
   }
 }
