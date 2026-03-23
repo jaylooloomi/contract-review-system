@@ -116,7 +116,8 @@
                   <span v-if="extractLaw(v.reason, v.details)" class="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-medium">{{ extractLaw(v.reason, v.details) }}</span>
                 </div>
                 <h4 class="font-bold text-gray-800 text-sm leading-tight">{{ v.clause }}</h4>
-                <p class="text-xs text-gray-500 mt-1.5 leading-relaxed">{{ v.details }}</p>
+                <p v-if="v.reason" class="text-xs text-blue-600 mt-1 flex items-center gap-1">⚖️ {{ v.reason }}</p>
+                <p class="text-xs text-gray-500 mt-1 leading-relaxed">{{ v.details }}</p>
               </div>
 
               <div v-if="!(analysis.violations?.length > 0)" class="bg-green-50 rounded-xl p-6 text-center text-green-700">
