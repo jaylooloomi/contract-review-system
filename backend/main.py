@@ -1,4 +1,6 @@
 import os
+import re
+import json
 import logging
 import httpx
 import pdfplumber
@@ -126,6 +128,66 @@ async def extract_html_from_pdf(file_bytes: bytes) -> str:
     return await loop.run_in_executor(None, _run_pdf2html_docker, file_bytes)
 
 
+def repair_llm_json(text: str) -> dict:
+    """
+    修復 LLM 輸出的 JSON 常見格式錯誤，與 n8n Result Parser v4 邏輯一致：
+    1. 移除 markdown code block（```json ... ```）
+    2. 先嘗試直接解析
+    3. regex 修復：跳過已引號字串，補上未加引號的非 ASCII 值
+    4. 嘗試提取 {...} 區塊後再解析
+    """
+    def strip_markdown(s: str) -> str:
+        return re.sub(r'```(?:json)?', '', s).replace('```', '').strip()
+
+    def repair(s: str) -> str:
+        # 與 n8n 相同 regex：先匹配已引號字串（跳過），再匹配未引號的非 ASCII 值
+        def replacer(m):
+            if m.group(1) is not None:   # 已引號字串，原樣保留
+                return m.group(1)
+            val = m.group(2).strip()
+            end = m.group(3)
+            return f': "{val}"{end}'
+        return re.sub(
+            r'("(?:[^"\\]|\\.)*")|:\s*([^\x00-\x7F][^,\[\]{}":\n\r]*?)(\s*[,}\]])',
+            replacer,
+            s
+        )
+
+    cleaned = strip_markdown(text)
+
+    # 1. 直接解析
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        pass
+
+    # 2. regex 修復後解析
+    try:
+        result = json.loads(repair(cleaned))
+        logger.info("JSON 修復成功（補上未加引號的非 ASCII 字串值）")
+        return result
+    except json.JSONDecodeError:
+        pass
+
+    # 3. 提取 {...} 區塊後再試
+    m = re.search(r'\{[\s\S]*\}', cleaned)
+    if m:
+        block = m.group(0)
+        try:
+            return json.loads(block)
+        except json.JSONDecodeError:
+            pass
+        try:
+            result = json.loads(repair(block))
+            logger.info("JSON 修復成功（提取區塊 + 補引號）")
+            return result
+        except json.JSONDecodeError:
+            pass
+
+    logger.error(f"JSON 無法解析，原始內容前 500 字: {text[:500]}")
+    raise json.JSONDecodeError("無法修復 LLM 輸出的 JSON", text, 0)
+
+
 REGION_LABEL = {
     "taiwan": "台灣消費者保護法",
     "china": "中國消費者權益保護法",
@@ -147,7 +209,10 @@ async def call_n8n_webhook(text: str, filename: str, region: str = "taiwan") -> 
         try:
             response = await client.post(N8N_WEBHOOK_URL, json=payload)
             response.raise_for_status()
-            result = response.json()
+            result = repair_llm_json(response.text)
+            # n8n 有時回傳陣列 [{...}]，取第一個元素
+            if isinstance(result, list):
+                result = result[0] if result else {}
             logger.info(f"n8n webhook 回應成功，狀態碼: {response.status_code}")
             logger.info(f"分析結果 - violations: {result.get('totalViolations', '?')} 個，riskScore: {result.get('riskScore', '?')}")
             return result
